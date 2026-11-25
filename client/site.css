@@ -93,6 +93,8 @@ h2 {
 
 .stack { display: flex; flex-direction: column; gap: 0.85rem; }
 
+.choices { margin-top: 1.35rem; }
+
 .card, .serving {
     background: var(--card);
     border: 1px solid var(--line);
