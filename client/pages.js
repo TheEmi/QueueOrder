@@ -103,6 +103,12 @@ export function Home(props, api) {
     const [error, setError] = api.useState("error", "");
     const [pending, setPending] = api.useState("pending", "");
     const [saved, setSaved] = api.useState("saved", null);
+    const [panel, setPanel] = api.useState("panel", "choose");
+
+    function open(next) {
+        setError("");
+        setPanel(next);
+    }
 
     api.onMount(() => {
         const sync = () => setSaved({ hosts: savedHosts(), tickets: savedTickets() });
@@ -159,6 +165,161 @@ export function Home(props, api) {
         api.navigate(`/s/${code}`);
     }
 
+    function backButton() {
+        return {
+            button: {
+                className: "text",
+                type: "button",
+                onclick: () => open("choose"),
+                textContent: "Back",
+            },
+        };
+    }
+
+    function choiceButtons() {
+        return {
+            div: {
+                className: "stack choices",
+                children: [
+                    {
+                        button: {
+                            className: "primary",
+                            type: "button",
+                            onclick: () => open("create"),
+                            textContent: "Create queue",
+                        },
+                    },
+                    {
+                        button: {
+                            className: "ghost",
+                            type: "button",
+                            onclick: () => open("join"),
+                            textContent: "Join queue",
+                        },
+                    },
+                ],
+            },
+        };
+    }
+
+    function createForm() {
+        return {
+            form: {
+                className: "card stack choices",
+                onsubmit: create,
+                children: [
+                    { h2: { textContent: "Create queue" } },
+                    textField({
+                        id: "queue-name",
+                        label: "Name",
+                        value: () => name(),
+                        set: setName,
+                        maxlength: 40,
+                        placeholder: "Front counter",
+                    }),
+                    {
+                        button: {
+                            className: "primary",
+                            type: "submit",
+                            disabled: () => pending() === "create",
+                            textContent: () => (pending() === "create" ? "Creating…" : "Create queue"),
+                        },
+                    },
+                    backButton(),
+                ],
+            },
+        };
+    }
+
+    function joinCustomerForm() {
+        return {
+            form: {
+                className: "card stack choices",
+                onsubmit: look,
+                children: [
+                    { h2: { textContent: "Join queue" } },
+                    {
+                        p: {
+                            className: "lede",
+                            textContent: "Enter the four-character code from the queue.",
+                        },
+                    },
+                    textField({
+                        id: "look-code",
+                        label: "Queue code",
+                        value: () => lookCode(),
+                        set: setLookCode,
+                        maxlength: 11,
+                        autocapitalize: "characters",
+                        placeholder: "AB12",
+                    }),
+                    { button: { className: "primary", type: "submit", textContent: "Join queue" } },
+                    {
+                        button: {
+                            className: "ghost",
+                            type: "button",
+                            onclick: () => open("host"),
+                            textContent: "I run this queue",
+                        },
+                    },
+                    backButton(),
+                ],
+            },
+        };
+    }
+
+    function joinHostForm() {
+        return {
+            form: {
+                className: "card stack choices",
+                onsubmit: join,
+                children: [
+                    { h2: { textContent: "Run it on this phone" } },
+                    {
+                        p: {
+                            className: "lede",
+                            textContent: "Enter the queue code and the pairing code from a phone that already runs it.",
+                        },
+                    },
+                    textField({
+                        id: "join-code",
+                        label: "Queue code",
+                        value: () => joinCode(),
+                        set: setJoinCode,
+                        maxlength: 11,
+                        autocapitalize: "characters",
+                        placeholder: "AB12",
+                    }),
+                    textField({
+                        id: "join-pair",
+                        label: "Pairing code",
+                        value: () => joinPair(),
+                        set: setJoinPair,
+                        maxlength: 11,
+                        autocapitalize: "characters",
+                        placeholder: "ABC DEF",
+                    }),
+                    {
+                        button: {
+                            className: "primary",
+                            type: "submit",
+                            disabled: () => pending() === "join",
+                            textContent: () => (pending() === "join" ? "Checking…" : "Run it on this phone"),
+                        },
+                    },
+                    {
+                        button: {
+                            className: "text",
+                            type: "button",
+                            onclick: () => open("join"),
+                            textContent: "Back",
+                        },
+                    },
+                ],
+            },
+        };
+    }
+
     return {
         section: {
             className: "screen",
@@ -168,7 +329,24 @@ export function Home(props, api) {
                 {
                     p: {
                         className: "lede",
-                        textContent: "Open a queue on this phone. People scan, take a number, and watch whose turn it is. You call the next one.",
+                        textContent: "Create a queue on this phone, or join one with its code. People take a number, and you call the next one.",
+                    },
+                },
+                {
+                    div: {
+                        children: () => {
+                            if (panel() === "create") return [createForm()];
+                            if (panel() === "join") return [joinCustomerForm()];
+                            if (panel() === "host") return [joinHostForm()];
+                            return [choiceButtons()];
+                        },
+                    },
+                },
+                {
+                    p: {
+                        className: "note",
+                        hidden: () => !error(),
+                        textContent: () => error(),
                     },
                 },
                 {
@@ -228,98 +406,6 @@ export function Home(props, api) {
                             }
                             return items;
                         },
-                    },
-                },
-                {
-                    form: {
-                        className: "card stack",
-                        onsubmit: create,
-                        children: [
-                            { h2: { textContent: "Open a queue" } },
-                            textField({
-                                id: "queue-name",
-                                label: "Name",
-                                value: () => name(),
-                                set: setName,
-                                maxlength: 40,
-                                placeholder: "Front counter",
-                            }),
-                            {
-                                button: {
-                                    className: "primary",
-                                    type: "submit",
-                                    disabled: () => pending() === "create",
-                                    textContent: () => (pending() === "create" ? "Opening…" : "Open a queue"),
-                                },
-                            },
-                        ],
-                    },
-                },
-                {
-                    form: {
-                        className: "card stack",
-                        onsubmit: join,
-                        children: [
-                            { h2: { textContent: "Add this phone" } },
-                            {
-                                p: {
-                                    className: "lede",
-                                    textContent: "Scan the pairing code on a phone that already runs the queue, or type both codes.",
-                                },
-                            },
-                            textField({
-                                id: "join-code",
-                                label: "Queue code",
-                                value: () => joinCode(),
-                                set: setJoinCode,
-                                maxlength: 11,
-                                autocapitalize: "characters",
-                                placeholder: "AB12",
-                            }),
-                            textField({
-                                id: "join-pair",
-                                label: "Pairing code",
-                                value: () => joinPair(),
-                                set: setJoinPair,
-                                maxlength: 11,
-                                autocapitalize: "characters",
-                                placeholder: "ABC DEF",
-                            }),
-                            {
-                                button: {
-                                    className: "ghost",
-                                    type: "submit",
-                                    disabled: () => pending() === "join",
-                                    textContent: () => (pending() === "join" ? "Checking…" : "Run it on this phone"),
-                                },
-                            },
-                        ],
-                    },
-                },
-                {
-                    form: {
-                        className: "card stack",
-                        onsubmit: look,
-                        children: [
-                            { h2: { textContent: "I have a queue code" } },
-                            textField({
-                                id: "look-code",
-                                label: "Queue code",
-                                value: () => lookCode(),
-                                set: setLookCode,
-                                maxlength: 11,
-                                autocapitalize: "characters",
-                                placeholder: "AB12",
-                            }),
-                            { button: { className: "ghost", type: "submit", textContent: "Take a number" } },
-                        ],
-                    },
-                },
-                {
-                    p: {
-                        className: "note",
-                        hidden: () => !error(),
-                        textContent: () => error(),
                     },
                 },
                 {

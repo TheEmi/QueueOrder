@@ -10,7 +10,7 @@ export const routes = [
         component: "Home",
         head: {
             title: "Queue Order",
-            description: "Open a queue, let people take a number, and call the next one.",
+            description: "Create a queue, or join one with its code.",
         },
     },
     {

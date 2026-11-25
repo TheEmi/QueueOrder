@@ -94,6 +94,18 @@ test("a queue gives numbers, calls the next, and can be closed or deleted", asyn
     });
 });
 
+test("the home page offers create queue and join queue", async () => {
+    await withApp(async (url) => {
+        const home = await fetch(`${url}/`);
+        const html = await home.text();
+        assert.equal(home.status, 200);
+        assert.match(html, />Create queue</);
+        assert.match(html, />Join queue</);
+        assert.equal(html.includes("queue-name"), false);
+        assert.equal(html.includes("look-code"), false);
+    });
+});
+
 test("pages render the queue and keep the pairing code off the customer page", async () => {
     await withApp(async (url) => {
         const { body } = await post(url, "createSession", ["Bakery"]);
