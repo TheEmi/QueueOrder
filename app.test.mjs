@@ -118,7 +118,7 @@ test("pages render the queue and keep the pairing code off the customer page", a
 
         assert.equal(customer.status, 200);
         assert.match(customerHtml, /<h1[^>]*>Bakery<\/h1>/);
-        assert.match(customerHtml, /Take a number/);
+        assert.match(customerHtml, /Your number/);
         assert.match(customerHtml, /site\.css\?v=/);
         assert.equal(customerHtml.includes(body.pair), false);
         assert.equal(hostHtml.includes(body.pair), false);

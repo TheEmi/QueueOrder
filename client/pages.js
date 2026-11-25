@@ -42,7 +42,7 @@ export function qrLayout(text, caption) {
         return { p: { className: "qr-wait", textContent: "Preparing the code…" } };
     }
     const { data, size } = encode(text, { ecc: "M", border: 4 });
-    const cells = [{ rect: { width: size, height: size, fill: "#fffdf8" } }];
+    const cells = [{ rect: { width: size, height: size, fill: "#ffffff" } }];
     for (let y = 0; y < size; y += 1) {
         for (let x = 0; x < size; x += 1) {
             if (data[y][x]) {
@@ -95,6 +95,17 @@ function textField({ id, label, value, set, maxlength, autocapitalize = "off", p
     };
 }
 
+function backButton(open) {
+    return {
+        button: {
+            className: "text",
+            type: "button",
+            onclick: () => open("choose"),
+            textContent: "Back",
+        },
+    };
+}
+
 export function Home(props, api) {
     const [name, setName] = api.useState("name", "");
     const [joinCode, setJoinCode] = api.useState("joinCode", "");
@@ -113,8 +124,7 @@ export function Home(props, api) {
     api.onMount(() => {
         const sync = () => setSaved({ hosts: savedHosts(), tickets: savedTickets() });
         sync();
-        const stopDevice = onDeviceChange(sync);
-        api.onCleanup(stopDevice);
+        api.onCleanup(onDeviceChange(sync));
     });
 
     async function create(event) {
@@ -155,31 +165,31 @@ export function Home(props, api) {
         }
     }
 
-    function look(event) {
+    async function look(event) {
         event.preventDefault();
+        if (pending()) return;
         const code = canonCode(lookCode());
         if (!isCode(code)) {
             setError("Enter the four-character queue code.");
             return;
         }
-        api.navigate(`/s/${code}`);
-    }
-
-    function backButton() {
-        return {
-            button: {
-                className: "text",
-                type: "button",
-                onclick: () => open("choose"),
-                textContent: "Back",
-            },
-        };
+        setPending("look");
+        setError("");
+        try {
+            const taken = await api.call("takeTicket", code, deviceId());
+            rememberTicket(code, taken.n, taken.name);
+            await api.navigate(`/s/${code}`);
+        } catch (failure) {
+            setError(errorMessage(failure));
+        } finally {
+            setPending("");
+        }
     }
 
     function choiceButtons() {
         return {
             div: {
-                className: "stack choices",
+                className: "choices",
                 children: [
                     {
                         button: {
@@ -205,7 +215,7 @@ export function Home(props, api) {
     function createForm() {
         return {
             form: {
-                className: "card stack choices",
+                className: "sheet stack",
                 onsubmit: create,
                 children: [
                     { h2: { textContent: "Create queue" } },
@@ -225,7 +235,7 @@ export function Home(props, api) {
                             textContent: () => (pending() === "create" ? "Creating…" : "Create queue"),
                         },
                     },
-                    backButton(),
+                    backButton(open),
                 ],
             },
         };
@@ -234,14 +244,14 @@ export function Home(props, api) {
     function joinCustomerForm() {
         return {
             form: {
-                className: "card stack choices",
+                className: "sheet stack",
                 onsubmit: look,
                 children: [
                     { h2: { textContent: "Join queue" } },
                     {
                         p: {
                             className: "lede",
-                            textContent: "Enter the four-character code from the queue.",
+                            textContent: "Enter the code. This phone gets a number straight away.",
                         },
                     },
                     textField({
@@ -253,7 +263,14 @@ export function Home(props, api) {
                         autocapitalize: "characters",
                         placeholder: "AB12",
                     }),
-                    { button: { className: "primary", type: "submit", textContent: "Join queue" } },
+                    {
+                        button: {
+                            className: "primary",
+                            type: "submit",
+                            disabled: () => pending() === "look",
+                            textContent: () => (pending() === "look" ? "Getting your number…" : "Join queue"),
+                        },
+                    },
                     {
                         button: {
                             className: "ghost",
@@ -262,7 +279,7 @@ export function Home(props, api) {
                             textContent: "I run this queue",
                         },
                     },
-                    backButton(),
+                    backButton(open),
                 ],
             },
         };
@@ -271,14 +288,14 @@ export function Home(props, api) {
     function joinHostForm() {
         return {
             form: {
-                className: "card stack choices",
+                className: "sheet stack",
                 onsubmit: join,
                 children: [
                     { h2: { textContent: "Run it on this phone" } },
                     {
                         p: {
                             className: "lede",
-                            textContent: "Enter the queue code and the pairing code from a phone that already runs it.",
+                            textContent: "Enter the queue code and the pairing code.",
                         },
                     },
                     textField({
@@ -322,14 +339,14 @@ export function Home(props, api) {
 
     return {
         section: {
-            className: "screen",
+            className: "home",
             children: [
                 wordmark(),
                 { h1: { textContent: "Give everyone a number" } },
                 {
                     p: {
                         className: "lede",
-                        textContent: "Create a queue on this phone, or join one with its code. People take a number, and you call the next one.",
+                        textContent: "Create a queue on this phone, or join one and take your place.",
                     },
                 },
                 {
@@ -351,67 +368,51 @@ export function Home(props, api) {
                 },
                 {
                     div: {
-                        className: "saved-block",
+                        className: "continue",
+                        hidden: () => {
+                            const data = saved();
+                            return !data || (!data.hosts.length && !data.tickets.length);
+                        },
                         children: () => {
                             const data = saved();
-                            if (!data) {
-                                return [{ p: { className: "status", textContent: "Looking for queues on this phone…" } }];
-                            }
-                            const items = [];
-                            if (data.hosts.length) {
-                                items.push({ h2: { textContent: "Queues on this phone" } });
-                                items.push({
-                                    ul: {
-                                        className: "saved-list",
-                                        children: data.hosts.map((host) => ({
-                                            li: {
-                                                key: `h-${host.code}`,
-                                                children: [{
-                                                    a: {
-                                                        className: "saved",
-                                                        href: `/h/${host.code}`,
-                                                        children: [
-                                                            { span: { className: "saved-name", textContent: host.name } },
-                                                            { span: { className: "saved-meta", textContent: host.code } },
-                                                        ],
-                                                    },
-                                                }],
+                            if (!data) return [];
+                            const items = [
+                                ...data.hosts.map((host) => ({
+                                    li: {
+                                        key: `h-${host.code}`,
+                                        children: [{
+                                            a: {
+                                                className: "saved",
+                                                href: `/h/${host.code}`,
+                                                children: [
+                                                    { span: { className: "saved-name", textContent: host.name } },
+                                                    { span: { className: "saved-meta", textContent: host.code } },
+                                                ],
                                             },
-                                        })),
+                                        }],
                                     },
-                                });
-                            }
-                            if (data.tickets.length) {
-                                items.push({ h2: { textContent: "Your numbers" } });
-                                items.push({
-                                    ul: {
-                                        className: "saved-list",
-                                        children: data.tickets.map((ticket) => ({
-                                            li: {
-                                                key: `t-${ticket.code}`,
-                                                children: [{
-                                                    a: {
-                                                        className: "saved",
-                                                        href: `/s/${ticket.code}`,
-                                                        children: [
-                                                            { span: { className: "saved-name", textContent: String(ticket.n) } },
-                                                            { span: { className: "saved-meta", textContent: `${ticket.name} · ${ticket.code}` } },
-                                                        ],
-                                                    },
-                                                }],
+                                })),
+                                ...data.tickets.map((ticket) => ({
+                                    li: {
+                                        key: `t-${ticket.code}`,
+                                        children: [{
+                                            a: {
+                                                className: "saved",
+                                                href: `/s/${ticket.code}`,
+                                                children: [
+                                                    { span: { className: "saved-name", textContent: String(ticket.n) } },
+                                                    { span: { className: "saved-meta", textContent: ticket.code } },
+                                                ],
                                             },
-                                        })),
+                                        }],
                                     },
-                                });
-                            }
-                            return items;
+                                })),
+                            ];
+                            return [
+                                { h2: { textContent: "On this phone" } },
+                                { ul: { className: "saved-list", children: items } },
+                            ];
                         },
-                    },
-                },
-                {
-                    p: {
-                        className: "hint",
-                        textContent: "A queue stays in this server's memory, and on the phones that open it. Restarting the server clears every queue.",
                     },
                 },
             ],
@@ -440,20 +441,42 @@ function holding(current, n) {
 export function Ticket(props, api) {
     const initial = canonCode(api.getState("$route.params.code"));
     let stopLive = api.live("board", "board", initial) ?? (() => {});
-    const [ready, setReady] = api.useState("ready", false);
     const [mine, setMine] = api.useState("mine", null);
     const [error, setError] = api.useState("error", "");
     const [pending, setPending] = api.useState("pending", false);
     const codeNow = () => canonCode(api.getState("$route.params.code"));
     const board = () => api.getState("board");
+    let again = () => {};
 
     api.onMount(() => {
-        api.setValue("origin", location.origin);
+        let busy = false;
+        const claim = async (code, force) => {
+            const held = ticketOf(code);
+            if (!force && held != null) {
+                setMine(held);
+                return;
+            }
+            if (busy) return;
+            busy = true;
+            setPending(true);
+            setError("");
+            try {
+                const taken = await api.call("takeTicket", code, deviceId());
+                rememberTicket(code, taken.n, taken.name);
+                setMine(taken.n);
+            } catch (failure) {
+                setError(errorMessage(failure));
+                setMine(ticketOf(code));
+            } finally {
+                busy = false;
+                setPending(false);
+            }
+        };
+        again = () => claim(codeNow(), true);
         let subscribed = initial;
         const stopWatch = api.bindState(() => codeNow(), (next) => {
-            setMine(ticketOf(next));
-            setReady(true);
             setError("");
+            claim(next, false);
             if (next === subscribed) return;
             stopLive();
             subscribed = next;
@@ -480,36 +503,75 @@ export function Ticket(props, api) {
         const current = board();
         if (!current) return "opening";
         if (!current.exists) return "missing";
-        if (!ready()) return "opening";
         return "ticket";
     };
 
-    async function take() {
-        if (pending()) return;
-        setPending(true);
-        setError("");
-        try {
-            const code = codeNow();
-            const taken = await api.call("takeTicket", code, deviceId());
-            rememberTicket(code, taken.n, taken.name);
-            setMine(taken.n);
-        } catch (failure) {
-            setError(errorMessage(failure));
-        } finally {
-            setPending(false);
-        }
-    }
-
     return {
         section: {
-            className: "screen",
+            className: "ticket",
             children: [
                 {
                     div: {
+                        className: "hero stack",
                         hidden: () => view() === "missing",
                         children: [
                             wordmark(),
                             { h1: { textContent: () => board()?.name || "Queue" } },
+                            { p: { className: "kicker", textContent: "Your number" } },
+                            {
+                                p: {
+                                    className: "number",
+                                    hidden: () => mine() == null,
+                                    textContent: () => displayNumber(mine()),
+                                },
+                            },
+                            {
+                                p: {
+                                    className: "status",
+                                    hidden: () => mine() != null || Boolean(error()) || view() === "opening",
+                                    textContent: "Getting your number…",
+                                },
+                            },
+                            {
+                                p: {
+                                    className: "place",
+                                    hidden: () => !placeOf(board(), mine()),
+                                    textContent: () => placeOf(board(), mine()),
+                                },
+                            },
+                            {
+                                button: {
+                                    className: "primary",
+                                    type: "button",
+                                    hidden: () => mine() == null || holding(board(), mine()) || pending() || Boolean(board()?.closed),
+                                    onclick: () => again(),
+                                    textContent: "New number",
+                                },
+                            },
+                            {
+                                button: {
+                                    className: "primary",
+                                    type: "button",
+                                    hidden: () => !error() || mine() != null,
+                                    onclick: () => again(),
+                                    textContent: "Try again",
+                                },
+                            },
+                            {
+                                p: {
+                                    className: "note",
+                                    hidden: () => !error(),
+                                    textContent: () => error(),
+                                },
+                            },
+                        ],
+                    },
+                },
+                {
+                    div: {
+                        className: "aside",
+                        hidden: () => view() !== "ticket",
+                        children: [
                             {
                                 p: {
                                     className: "status",
@@ -523,104 +585,29 @@ export function Ticket(props, api) {
                                 },
                             },
                             {
-                                div: {
-                                    className: "serving",
+                                p: {
+                                    className: "serving-line",
                                     children: [
-                                        { p: { className: "kicker", textContent: "Now serving" } },
-                                        {
-                                            p: {
-                                                className: "number",
-                                                "aria-live": "polite",
-                                                textContent: () => displayNumber(board()?.serving),
-                                            },
-                                        },
-                                        {
-                                            p: {
-                                                className: "waiting-count",
-                                                textContent: () => {
-                                                    const count = board()?.waiting?.length ?? 0;
-                                                    if (count === 0) return "No one waiting";
-                                                    return count === 1 ? "1 waiting" : `${count} waiting`;
-                                                },
-                                            },
-                                        },
-                                        {
-                                            p: {
-                                                className: "banner",
-                                                hidden: () => !board()?.closed,
-                                                textContent: "This queue is closed.",
-                                            },
-                                        },
+                                        "Now serving ",
+                                        { strong: { textContent: () => displayNumber(board()?.serving) } },
                                     ],
                                 },
                             },
                             {
                                 p: {
-                                    className: "status",
-                                    hidden: () => view() !== "opening",
-                                    textContent: "Checking this phone…",
+                                    className: "waiting-count",
+                                    textContent: () => {
+                                        const count = board()?.waiting?.length ?? 0;
+                                        if (count === 0) return "No one waiting";
+                                        return count === 1 ? "1 waiting" : `${count} waiting`;
+                                    },
                                 },
                             },
                             {
-                                div: {
-                                    className: "card stack",
-                                    hidden: () => view() !== "ticket",
-                                    children: [
-                                        {
-                                            div: {
-                                                hidden: () => !holding(board(), mine()),
-                                                children: [
-                                                    { p: { className: "kicker", textContent: "Your number" } },
-                                                    {
-                                                        p: {
-                                                            className: "number mine",
-                                                            textContent: () => displayNumber(mine()),
-                                                        },
-                                                    },
-                                                    {
-                                                        p: {
-                                                            className: "place",
-                                                            textContent: () => placeOf(board(), mine()),
-                                                        },
-                                                    },
-                                                ],
-                                            },
-                                        },
-                                        {
-                                            div: {
-                                                className: "stack",
-                                                hidden: () => holding(board(), mine()),
-                                                children: [
-                                                    {
-                                                        p: {
-                                                            className: "place",
-                                                            hidden: () => !placeOf(board(), mine()),
-                                                            textContent: () => placeOf(board(), mine()),
-                                                        },
-                                                    },
-                                                    {
-                                                        button: {
-                                                            className: "primary",
-                                                            type: "button",
-                                                            onclick: take,
-                                                            disabled: () => pending() || Boolean(board()?.closed),
-                                                            textContent: () => {
-                                                                if (pending()) return "Taking…";
-                                                                return mine() == null ? "Take a number" : "Take a new number";
-                                                            },
-                                                        },
-                                                    },
-                                                ],
-                                            },
-                                        },
-                                        {
-                                            p: {
-                                                className: "note",
-                                                hidden: () => !error(),
-                                                textContent: () => error(),
-                                            },
-                                        },
-                                    ],
+                                p: {
+                                    className: "banner",
+                                    hidden: () => !board()?.closed,
+                                    textContent: "This queue is closed.",
                                 },
                             },
                         ],
@@ -628,7 +615,7 @@ export function Ticket(props, api) {
                 },
                 {
                     div: {
-                        className: "stack",
+                        className: "hero stack",
                         hidden: () => view() !== "missing",
                         children: [
                             wordmark(),
@@ -643,6 +630,13 @@ export function Ticket(props, api) {
                         ],
                     },
                 },
+                {
+                    p: {
+                        className: "status",
+                        hidden: () => view() !== "opening",
+                        textContent: "Opening the queue…",
+                    },
+                },
             ],
         },
     };
@@ -654,6 +648,8 @@ export function Counter(props, api) {
     const [ready, setReady] = api.useState("ready", false);
     const [paired, setPaired] = api.useState("paired", false);
     const [room, setRoom] = api.useState("room", false);
+    const [pane, setPane] = api.useState("pane", "now");
+    const [share, setShare] = api.useState("share", "customers");
     const [confirm, setConfirm] = api.useState("confirm", false);
     const [pairInput, setPairInput] = api.useState("pairInput", "");
     const [error, setError] = api.useState("error", "");
@@ -788,12 +784,11 @@ export function Counter(props, api) {
     }
 
     function forget() {
-        const code = codeNow();
-        forgetHost(code);
+        forgetHost(codeNow());
         setPaired(false);
         setRoom(false);
         setConfirm(false);
-        setNotice("This phone no longer runs the queue. The queue itself is still open.");
+        setNotice("This phone no longer runs the queue.");
     }
 
     async function destroy() {
@@ -846,38 +841,131 @@ export function Counter(props, api) {
         return "Next";
     }
 
+    function tab(id, label) {
+        return {
+            button: {
+                type: "button",
+                classList: { "is-on": () => pane() === id },
+                onclick: () => setPane(id),
+                textContent: label,
+            },
+        };
+    }
+
     return {
         section: {
-            className: "screen",
+            className: "shell",
             children: [
                 {
                     div: {
-                        hidden: () => view() === "missing" || view() === "room",
-                        children: [
-                            wordmark(),
-                            { h1: { textContent: () => board()?.name || "Queue" } },
-                            {
-                                p: {
-                                    className: "code",
-                                    translate: "no",
-                                    textContent: () => spaced(codeNow()),
-                                },
-                            },
-                            {
-                                p: {
-                                    className: "status",
-                                    hidden: () => {
-                                        const state = api.liveState("board");
-                                        return state !== "offline" && state !== "failed";
+                        className: "center",
+                        hidden: () => view() === "desk" || view() === "room",
+                        children: () => {
+                            if (view() === "missing") {
+                                return [{
+                                    div: {
+                                        className: "center-card stack",
+                                        children: [
+                                            wordmark(),
+                                            { h1: { textContent: "This queue is gone" } },
+                                            {
+                                                p: {
+                                                    className: "lede",
+                                                    textContent: "It was deleted, or the server restarted and forgot it.",
+                                                },
+                                            },
+                                            { a: { className: "primary link", href: "/", textContent: "Back home" } },
+                                        ],
                                     },
-                                    textContent: () => (api.liveState("board") === "failed"
-                                        ? (api.liveMessage("board") || "The queue is not updating.")
-                                        : "Reconnecting…"),
+                                }];
+                            }
+                            if (view() === "join") {
+                                return [{
+                                    form: {
+                                        className: "center-card stack",
+                                        onsubmit: unlock,
+                                        children: [
+                                            wordmark(),
+                                            { h1: { textContent: () => board()?.name || "Queue" } },
+                                            {
+                                                p: {
+                                                    className: "lede",
+                                                    textContent: "Enter the pairing code to run this queue here.",
+                                                },
+                                            },
+                                            textField({
+                                                id: "host-pair",
+                                                label: "Pairing code",
+                                                value: () => pairInput(),
+                                                set: setPairInput,
+                                                maxlength: 11,
+                                                autocapitalize: "characters",
+                                                placeholder: "ABC DEF",
+                                            }),
+                                            {
+                                                button: {
+                                                    className: "primary",
+                                                    type: "submit",
+                                                    disabled: () => pending(),
+                                                    textContent: () => (pending() ? "Checking…" : "Use this phone"),
+                                                },
+                                            },
+                                        ],
+                                    },
+                                }];
+                            }
+                            return [{ p: { className: "status", textContent: "Checking this phone…" } }];
+                        },
+                    },
+                },
+                {
+                    div: {
+                        className: "desk",
+                        hidden: () => view() !== "desk" && view() !== "room",
+                        children: [
+                            {
+                                header: {
+                                    className: "topbar",
+                                    children: [
+                                        {
+                                            div: {
+                                                className: "stack",
+                                                children: [
+                                                    wordmark(),
+                                                    { h1: { textContent: () => board()?.name || "Queue" } },
+                                                ],
+                                            },
+                                        },
+                                        {
+                                            div: {
+                                                className: "stack",
+                                                children: [
+                                                    {
+                                                        p: {
+                                                            className: "code",
+                                                            translate: "no",
+                                                            textContent: () => spaced(codeNow()),
+                                                        },
+                                                    },
+                                                    {
+                                                        button: {
+                                                            className: "text",
+                                                            type: "button",
+                                                            onclick: toggleClosed,
+                                                            disabled: () => pending(),
+                                                            textContent: () => (board()?.closed ? "Open queue" : "Close queue"),
+                                                        },
+                                                    },
+                                                ],
+                                            },
+                                        },
+                                    ],
                                 },
                             },
                             {
                                 div: {
-                                    className: "serving",
+                                    className: "pane stage",
+                                    classList: { "is-on": () => pane() === "now" },
                                     children: [
                                         { p: { className: "kicker", textContent: "Now serving" } },
                                         {
@@ -904,56 +992,21 @@ export function Counter(props, api) {
                                                 textContent: "Closed to new numbers.",
                                             },
                                         },
-                                    ],
-                                },
-                            },
-                            {
-                                p: {
-                                    className: "status",
-                                    hidden: () => view() !== "opening",
-                                    textContent: "Checking this phone…",
-                                },
-                            },
-                            {
-                                form: {
-                                    className: "card stack",
-                                    hidden: () => view() !== "join",
-                                    onsubmit: unlock,
-                                    children: [
-                                        { h2: { textContent: "Run this queue here" } },
                                         {
                                             p: {
-                                                className: "lede",
-                                                textContent: "Enter the pairing code from a phone that already runs it, or scan that phone's pairing code.",
+                                                className: "status",
+                                                hidden: () => {
+                                                    const state = api.liveState("board");
+                                                    return state !== "offline" && state !== "failed";
+                                                },
+                                                textContent: () => (api.liveState("board") === "failed"
+                                                    ? (api.liveMessage("board") || "The queue is not updating.")
+                                                    : "Reconnecting…"),
                                             },
                                         },
-                                        textField({
-                                            id: "host-pair",
-                                            label: "Pairing code",
-                                            value: () => pairInput(),
-                                            set: setPairInput,
-                                            maxlength: 11,
-                                            autocapitalize: "characters",
-                                            placeholder: "ABC DEF",
-                                        }),
-                                        {
-                                            button: {
-                                                className: "primary",
-                                                type: "submit",
-                                                disabled: () => pending(),
-                                                textContent: () => (pending() ? "Checking…" : "Use this phone"),
-                                            },
-                                        },
-                                    ],
-                                },
-                            },
-                            {
-                                div: {
-                                    hidden: () => view() !== "desk",
-                                    children: [
                                         {
                                             div: {
-                                                className: "stack actions",
+                                                className: "stage-actions",
                                                 children: [
                                                     {
                                                         button: {
@@ -972,44 +1025,84 @@ export function Counter(props, api) {
                                                             hidden: () => board()?.serving == null,
                                                             onclick: skip,
                                                             disabled: () => pending(),
-                                                            textContent: "Skip this number",
+                                                            textContent: "Skip",
+                                                        },
+                                                    },
+                                                    {
+                                                        button: {
+                                                            className: "ghost",
+                                                            type: "button",
+                                                            onclick: () => setRoom(true),
+                                                            textContent: "Show to the room",
                                                         },
                                                     },
                                                 ],
                                             },
                                         },
+                                    ],
+                                },
+                            },
+                            {
+                                div: {
+                                    className: "pane line",
+                                    classList: { "is-on": () => pane() === "line" },
+                                    children: [
+                                        { h2: { textContent: "Waiting" } },
                                         {
-                                            div: {
-                                                className: "card",
-                                                children: [
-                                                    { h2: { textContent: "Waiting" } },
-                                                    {
-                                                        p: {
-                                                            className: "lede",
-                                                            hidden: () => (board()?.waiting?.length ?? 0) > 0,
-                                                            textContent: "No one is waiting.",
-                                                        },
-                                                    },
-                                                    {
-                                                        ol: {
-                                                            className: "queue",
-                                                            children: () => (board()?.waiting ?? []).map((n) => ({
-                                                                li: {
-                                                                    key: n,
-                                                                    className: "queue-row",
-                                                                    children: [
-                                                                        { span: { className: "queue-num", textContent: String(n) } },
-                                                                        {
-                                                                            button: {
-                                                                                type: "button",
-                                                                                onclick: () => remove(n),
-                                                                                disabled: () => pending(),
-                                                                                textContent: "Remove",
-                                                                            },
-                                                                        },
-                                                                    ],
+                                            p: {
+                                                className: "lede",
+                                                hidden: () => (board()?.waiting?.length ?? 0) > 0,
+                                                textContent: "No one is waiting.",
+                                            },
+                                        },
+                                        {
+                                            ol: {
+                                                className: "queue",
+                                                children: () => (board()?.waiting ?? []).map((n) => ({
+                                                    li: {
+                                                        key: n,
+                                                        className: "queue-row",
+                                                        children: [
+                                                            { span: { className: "queue-num", textContent: String(n) } },
+                                                            {
+                                                                button: {
+                                                                    type: "button",
+                                                                    onclick: () => remove(n),
+                                                                    disabled: () => pending(),
+                                                                    textContent: "Remove",
                                                                 },
-                                                            })),
+                                                            },
+                                                        ],
+                                                    },
+                                                })),
+                                            },
+                                        },
+                                    ],
+                                },
+                            },
+                            {
+                                div: {
+                                    className: "pane share",
+                                    classList: { "is-on": () => pane() === "share" },
+                                    children: [
+                                        {
+                                            div: {
+                                                className: "share-switch",
+                                                children: [
+                                                    {
+                                                        button: {
+                                                            type: "button",
+                                                            classList: { "is-on": () => share() === "customers" },
+                                                            onclick: () => setShare("customers"),
+                                                            textContent: "Customers",
+                                                        },
+                                                    },
+                                                    {
+                                                        button: {
+                                                            type: "button",
+                                                            classList: { "is-on": () => share() === "phone" },
+                                                            onclick: () => setShare("phone"),
+                                                            textContent: "Add a phone",
                                                         },
                                                     },
                                                 ],
@@ -1017,38 +1110,39 @@ export function Counter(props, api) {
                                         },
                                         {
                                             div: {
-                                                className: "card stack",
+                                                className: "share-block",
+                                                classList: { "is-on": () => share() === "customers" },
                                                 children: [
-                                                    { h2: { textContent: "Customers" } },
-                                                    {
-                                                        p: {
-                                                            className: "lede",
-                                                            textContent: "They scan this, then take a number.",
-                                                        },
-                                                    },
                                                     {
                                                         div: {
                                                             children: () => [qrLayout(customerUrl(), "Customer code")],
                                                         },
                                                     },
                                                     {
-                                                        p: {
-                                                            className: "code",
-                                                            translate: "no",
-                                                            textContent: () => spaced(codeNow()),
-                                                        },
-                                                    },
-                                                    {
-                                                        p: {
-                                                            className: "hint",
-                                                            hidden: () => !onThisMachine(api.getState("origin")),
-                                                            textContent: "This code only opens on this computer. Visit this page from the computer's network address, then show it again.",
-                                                        },
-                                                    },
-                                                    {
                                                         div: {
-                                                            className: "row-actions",
+                                                            className: "stack",
                                                             children: [
+                                                                { h2: { textContent: "Customers" } },
+                                                                {
+                                                                    p: {
+                                                                        className: "lede",
+                                                                        textContent: "They scan this and get a number.",
+                                                                    },
+                                                                },
+                                                                {
+                                                                    p: {
+                                                                        className: "code",
+                                                                        translate: "no",
+                                                                        textContent: () => spaced(codeNow()),
+                                                                    },
+                                                                },
+                                                                {
+                                                                    p: {
+                                                                        className: "hint",
+                                                                        hidden: () => !onThisMachine(api.getState("origin")),
+                                                                        textContent: "Open this page from the public address before showing the code.",
+                                                                    },
+                                                                },
                                                                 {
                                                                     button: {
                                                                         className: "ghost",
@@ -1057,83 +1151,58 @@ export function Counter(props, api) {
                                                                         textContent: "Copy customer link",
                                                                     },
                                                                 },
+                                                            ],
+                                                        },
+                                                    },
+                                                ],
+                                            },
+                                        },
+                                        {
+                                            div: {
+                                                className: "share-block",
+                                                classList: { "is-on": () => share() === "phone" },
+                                                children: [
+                                                    {
+                                                        div: {
+                                                            children: () => [qrLayout(paired() ? pairUrl() : "", "Pairing code")],
+                                                        },
+                                                    },
+                                                    {
+                                                        div: {
+                                                            className: "stack",
+                                                            children: [
+                                                                { h2: { textContent: "Add a phone" } },
+                                                                {
+                                                                    p: {
+                                                                        className: "lede",
+                                                                        textContent: "Scan this to let another phone call the next number.",
+                                                                    },
+                                                                },
+                                                                {
+                                                                    p: {
+                                                                        className: "code",
+                                                                        translate: "no",
+                                                                        textContent: () => (paired() ? spaced(pairFor(codeNow())) : ""),
+                                                                    },
+                                                                },
                                                                 {
                                                                     button: {
                                                                         className: "ghost",
                                                                         type: "button",
-                                                                        onclick: () => setRoom(true),
-                                                                        textContent: "Show to the room",
+                                                                        onclick: () => copy(pairUrl()),
+                                                                        textContent: "Copy pairing link",
                                                                     },
                                                                 },
                                                             ],
                                                         },
                                                     },
-                                                    {
-                                                        a: {
-                                                            href: () => `/s/${codeNow()}`,
-                                                            textContent: "Open the customer page",
-                                                        },
-                                                    },
                                                 ],
                                             },
                                         },
                                         {
                                             div: {
-                                                className: "card stack",
+                                                className: "quiet",
                                                 children: [
-                                                    { h2: { textContent: "Add another phone" } },
-                                                    {
-                                                        p: {
-                                                            className: "lede",
-                                                            textContent: "Scan this on the other phone, or read the code out.",
-                                                        },
-                                                    },
-                                                    {
-                                                        div: {
-                                                            children: () => [
-                                                                qrLayout(paired() ? pairUrl() : "", "Pairing code"),
-                                                            ],
-                                                        },
-                                                    },
-                                                    {
-                                                        p: {
-                                                            className: "code",
-                                                            translate: "no",
-                                                            textContent: () => (paired() ? spaced(pairFor(codeNow())) : ""),
-                                                        },
-                                                    },
-                                                    {
-                                                        p: {
-                                                            className: "hint",
-                                                            textContent: "Anyone with this code can call the next number and delete the queue.",
-                                                        },
-                                                    },
-                                                    {
-                                                        button: {
-                                                            className: "ghost",
-                                                            type: "button",
-                                                            onclick: () => copy(pairUrl()),
-                                                            textContent: "Copy pairing link",
-                                                        },
-                                                    },
-                                                ],
-                                            },
-                                        },
-                                        {
-                                            div: {
-                                                className: "stack quiet",
-                                                children: [
-                                                    {
-                                                        button: {
-                                                            className: "ghost",
-                                                            type: "button",
-                                                            onclick: toggleClosed,
-                                                            disabled: () => pending(),
-                                                            textContent: () => (board()?.closed
-                                                                ? "Open the queue again"
-                                                                : "Close the queue"),
-                                                        },
-                                                    },
                                                     {
                                                         button: {
                                                             className: "text",
@@ -1148,32 +1217,26 @@ export function Counter(props, api) {
                                                             type: "button",
                                                             hidden: () => confirm(),
                                                             onclick: () => setConfirm(true),
-                                                            textContent: "Delete this queue",
+                                                            textContent: "Delete queue",
                                                         },
                                                     },
                                                     {
-                                                        div: {
-                                                            className: "row-actions",
+                                                        button: {
+                                                            className: "text danger",
+                                                            type: "button",
                                                             hidden: () => !confirm(),
-                                                            children: [
-                                                                {
-                                                                    button: {
-                                                                        className: "primary",
-                                                                        type: "button",
-                                                                        onclick: destroy,
-                                                                        disabled: () => pending(),
-                                                                        textContent: "Yes, delete it",
-                                                                    },
-                                                                },
-                                                                {
-                                                                    button: {
-                                                                        className: "ghost",
-                                                                        type: "button",
-                                                                        onclick: () => setConfirm(false),
-                                                                        textContent: "Keep it",
-                                                                    },
-                                                                },
-                                                            ],
+                                                            onclick: destroy,
+                                                            disabled: () => pending(),
+                                                            textContent: "Yes, delete it",
+                                                        },
+                                                    },
+                                                    {
+                                                        button: {
+                                                            className: "text",
+                                                            type: "button",
+                                                            hidden: () => !confirm(),
+                                                            onclick: () => setConfirm(false),
+                                                            textContent: "Keep it",
                                                         },
                                                     },
                                                 ],
@@ -1183,17 +1246,16 @@ export function Counter(props, api) {
                                 },
                             },
                             {
-                                p: {
-                                    className: "note",
-                                    hidden: () => !error(),
-                                    textContent: () => error(),
-                                },
-                            },
-                            {
-                                p: {
-                                    className: "status",
-                                    hidden: () => !notice(),
-                                    textContent: () => notice(),
+                                nav: {
+                                    className: "tabs",
+                                    children: [
+                                        tab("now", "Now"),
+                                        tab("line", () => {
+                                            const count = board()?.waiting?.length ?? 0;
+                                            return count ? `Line ${count}` : "Line";
+                                        }),
+                                        tab("share", "Share"),
+                                    ],
                                 },
                             },
                         ],
@@ -1232,20 +1294,17 @@ export function Counter(props, api) {
                     },
                 },
                 {
-                    div: {
-                        className: "stack",
-                        hidden: () => view() !== "missing",
-                        children: [
-                            wordmark(),
-                            { h1: { textContent: "This queue is gone" } },
-                            {
-                                p: {
-                                    className: "lede",
-                                    textContent: "It was deleted, or the server restarted and forgot it. This phone has let go of it.",
-                                },
-                            },
-                            { a: { className: "primary link", href: "/", textContent: "Back home" } },
-                        ],
+                    p: {
+                        className: "toast note",
+                        hidden: () => !error(),
+                        textContent: () => error(),
+                    },
+                },
+                {
+                    p: {
+                        className: "toast",
+                        hidden: () => !notice() || Boolean(error()),
+                        textContent: () => notice(),
                     },
                 },
             ],
@@ -1294,64 +1353,71 @@ export function Pair(props, api) {
 
     return {
         section: {
-            className: "screen stack",
+            className: "center",
             children: [
-                wordmark(),
                 {
-                    h1: {
-                        textContent: () => (board()?.exists
-                            ? `Add this phone to ${board().name}`
-                            : "Add this phone"),
-                    },
-                },
-                {
-                    p: {
-                        className: "lede",
-                        hidden: () => board()?.exists !== false,
-                        textContent: "That queue is not on the server.",
-                    },
-                },
-                {
-                    p: {
-                        className: "status",
-                        hidden: () => !auto() || Boolean(error()),
-                        textContent: "Adding this phone…",
-                    },
-                },
-                {
-                    form: {
-                        className: "card stack",
-                        hidden: () => board()?.exists === false || (auto() && !error()),
-                        onsubmit: (event) => {
-                            event.preventDefault();
-                            submit(pairInput());
-                        },
+                    div: {
+                        className: "center-card stack",
                         children: [
-                            textField({
-                                id: "pair-code",
-                                label: "Pairing code",
-                                value: () => pairInput(),
-                                set: setPairInput,
-                                maxlength: 11,
-                                autocapitalize: "characters",
-                                placeholder: "ABC DEF",
-                            }),
+                            wordmark(),
                             {
-                                button: {
-                                    className: "primary",
-                                    type: "submit",
-                                    disabled: () => pending(),
-                                    textContent: () => (pending() ? "Checking…" : "Use this phone"),
+                                h1: {
+                                    textContent: () => (board()?.exists
+                                        ? board().name
+                                        : "Add this phone"),
+                                },
+                            },
+                            {
+                                p: {
+                                    className: "lede",
+                                    hidden: () => board()?.exists !== false,
+                                    textContent: "That queue is not on the server.",
+                                },
+                            },
+                            {
+                                p: {
+                                    className: "status",
+                                    hidden: () => !auto() || Boolean(error()),
+                                    textContent: "Adding this phone…",
+                                },
+                            },
+                            {
+                                form: {
+                                    className: "stack",
+                                    hidden: () => board()?.exists === false || (auto() && !error()),
+                                    onsubmit: (event) => {
+                                        event.preventDefault();
+                                        submit(pairInput());
+                                    },
+                                    children: [
+                                        textField({
+                                            id: "pair-code",
+                                            label: "Pairing code",
+                                            value: () => pairInput(),
+                                            set: setPairInput,
+                                            maxlength: 11,
+                                            autocapitalize: "characters",
+                                            placeholder: "ABC DEF",
+                                        }),
+                                        {
+                                            button: {
+                                                className: "primary",
+                                                type: "submit",
+                                                disabled: () => pending(),
+                                                textContent: () => (pending() ? "Checking…" : "Use this phone"),
+                                            },
+                                        },
+                                    ],
+                                },
+                            },
+                            {
+                                p: {
+                                    className: "note",
+                                    hidden: () => !error(),
+                                    textContent: () => error(),
                                 },
                             },
                         ],
-                    },
-                },
-                {
-                    p: {
-                        className: "note",
-                        hidden: () => !error(),
-                        textContent: () => error(),
                     },
                 },
             ],
@@ -1362,12 +1428,19 @@ export function Pair(props, api) {
 export function Missing() {
     return {
         section: {
-            className: "screen stack",
+            className: "center",
             children: [
-                wordmark(),
-                { h1: { textContent: "Nothing here" } },
-                { p: { className: "lede", textContent: "That page is not part of Queue Order." } },
-                { a: { className: "primary link", href: "/", textContent: "Back home" } },
+                {
+                    div: {
+                        className: "center-card stack",
+                        children: [
+                            wordmark(),
+                            { h1: { textContent: "Nothing here" } },
+                            { p: { className: "lede", textContent: "That page is not part of Queue Order." } },
+                            { a: { className: "primary link", href: "/", textContent: "Back home" } },
+                        ],
+                    },
+                },
             ],
         },
     };

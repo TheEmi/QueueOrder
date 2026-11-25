@@ -60,7 +60,7 @@ export function createApp({ services, dev = false, build = "dev", trustProxy = f
             head: async ({ versioned }) => ({
                 styles: [{ href: await versioned("/client/site.css") }],
                 meta: [
-                    { name: "theme-color", content: "#f4efe6" },
+                    { name: "theme-color", content: "#ffffff" },
                     { name: "robots", content: "noindex" },
                 ],
             }),
