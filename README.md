@@ -13,7 +13,7 @@ npm install
 node server.mjs
 ```
 
-Open the address it prints. Use the computer's network address, not `localhost`, when other phones need to scan the code.
+The server listens on port 3000, or on `PORT` when that is set. Open `http://127.0.0.1:3000` on this computer. Behind a proxy, open the public address and publish the same port.
 
 ## Two codes
 
