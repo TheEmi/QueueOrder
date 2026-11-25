@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import net from "node:net";
 import { test } from "node:test";
 import Juris from "juris/juris.js";
 import SSRRenderer from "juris-kit/server/ssr-renderer.js";
@@ -176,6 +178,55 @@ test("a live board hears a new number", async () => {
             await reader.cancel();
         }
     });
+});
+
+function freePort() {
+    return new Promise((resolve, reject) => {
+        const probe = net.createServer();
+        probe.once("error", reject);
+        probe.listen(0, "127.0.0.1", () => {
+            const { port } = probe.address();
+            probe.close(() => resolve(port));
+        });
+    });
+}
+
+test("the server listens for the proxy and serves create and join at the root", async () => {
+    const port = await freePort();
+    const child = spawn(process.execPath, ["server.mjs"], {
+        env: { ...process.env, PORT: String(port), NODE_ENV: "production", PROD: "1" },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    child.stdout.on("data", (chunk) => { output += chunk; });
+    child.stderr.on("data", (chunk) => { output += chunk; });
+    const started = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(output || "server did not start")), 10000);
+        const watch = () => {
+            if (!output.includes("listening on")) return;
+            clearTimeout(timer);
+            child.stdout.off("data", watch);
+            child.stderr.off("data", watch);
+            resolve();
+        };
+        child.stdout.on("data", watch);
+        child.stderr.on("data", watch);
+    });
+    try {
+        await started;
+        assert.match(output, new RegExp(`Queue Order is listening on 0\\.0\\.0\\.0:${port}`));
+        assert.equal(output.includes("other phones can scan"), false);
+        assert.equal(output.includes("127.0.0.1"), false);
+        const home = await fetch(`http://127.0.0.1:${port}/`);
+        const html = await home.text();
+        assert.equal(home.status, 200);
+        assert.match(html, />Create queue</);
+        assert.match(html, />Join queue</);
+    } finally {
+        child.kill("SIGTERM");
+        await exited;
+    }
 });
 
 test("a customer link renders as an SVG QR", () => {

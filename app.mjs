@@ -7,11 +7,12 @@ function boardTarget(code) {
     return canon ? [{ name: "board", args: [canon] }] : [];
 }
 
-export function createApp({ services, dev = false, build = "dev" }) {
+export function createApp({ services, dev = false, build = "dev", trustProxy = false }) {
     return createJurisServer({
         root: new URL(".", import.meta.url),
         dev,
         build,
+        trustProxy,
         services,
         routes,
         setup: register,
