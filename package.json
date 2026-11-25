@@ -1,0 +1,20 @@
+{
+  "name": "queue-order",
+  "version": "1.0.0",
+  "description": "A queue you run from a phone. Customers scan a code and take a number.",
+  "private": true,
+  "scripts": {
+    "test": "node --test app.test.mjs",
+    "start": "node server.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "juris-kit": "^0.93.0"
+  }
+}
