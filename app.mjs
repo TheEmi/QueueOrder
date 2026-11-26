@@ -32,7 +32,7 @@ function visitor(req, url, trustProxy) {
     return { deviceId: randomUUID(), fresh: true, origin };
 }
 
-function pageState({ route, viewer }, services) {
+async function pageState({ route, viewer }, services, invalidate) {
     const deviceId = viewer?.deviceId || "";
     const roots = { origin: viewer?.origin || "", deviceId };
     if (route?.name !== "ticket" || !deviceId) return roots;
@@ -42,6 +42,13 @@ function pageState({ route, viewer }, services) {
     if (current.closed) return { ...roots, ticketError: { code, message: "This queue is closed." } };
     try {
         const taken = services.takeTicket(code, deviceId);
+        // The page calls the service itself, so the live line is told here. A call through
+        // /api does this on its own. The number stands either way.
+        try {
+            await invalidate([{ name: "board", args: [code] }]);
+        } catch (error) {
+            console.error(error);
+        }
         return { ...roots, ticket: { code, n: taken.n, name: taken.name } };
     } catch (error) {
         const message = error?.expose ? error.message : "Something went wrong. Try again.";
@@ -55,7 +62,8 @@ function boardTarget(code) {
 }
 
 export function createApp({ services, dev = false, build = "dev", trustProxy = false }) {
-    return createJurisServer({
+    let invalidate = () => Promise.resolve();
+    const created = createJurisServer({
         root: new URL(".", import.meta.url),
         dev,
         build,
@@ -104,7 +112,7 @@ export function createApp({ services, dev = false, build = "dev", trustProxy = f
         page: {
             title,
             viewer: (req, url) => visitor(req, url, trustProxy),
-            state: (ctx) => pageState(ctx, services),
+            state: (ctx) => pageState(ctx, services, (targets) => invalidate(targets)),
             head: async ({ versioned }) => ({
                 styles: [{ href: await versioned("/client/site.css") }],
                 meta: [
@@ -120,5 +128,9 @@ export function createApp({ services, dev = false, build = "dev", trustProxy = f
                     : {}),
             }),
         },
+    });
+    return Promise.resolve(created).then((app) => {
+        invalidate = (targets) => app.invalidate(targets);
+        return app;
     });
 }

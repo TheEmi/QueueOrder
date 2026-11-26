@@ -248,6 +248,95 @@ function freePort() {
     });
 }
 
+test("opening a customer page tells a host who is already watching", async () => {
+    await withApp(async (url) => {
+        const { body } = await post(url, "createSession", ["Window"]);
+        const response = await fetch(`${url}/api/events`);
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+        let text = "";
+        const next = async (type) => {
+            const event = new RegExp(`event: ${type}\\ndata: (.*)\\n\\n`);
+            let found;
+            const deadline = Date.now() + 2000;
+            while (!(found = event.exec(text))) {
+                if (Date.now() > deadline) throw new Error(`no ${type} event`);
+                const chunk = await Promise.race([
+                    reader.read(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error(`no ${type} event`)), deadline - Date.now())),
+                ]);
+                if (chunk.done) return null;
+                text += chunk.value;
+            }
+            text = text.slice(found.index + found[0].length);
+            return JSON.parse(found[1]);
+        };
+        const waitingOf = (patch) => {
+            if (Array.isArray(patch?.full?.waiting)) return patch.full.waiting;
+            const set = patch?.set?.find(([path]) => path === "waiting");
+            return set?.[1];
+        };
+        try {
+            const hello = await next("hello");
+            const subscribed = await fetch(`${url}/api/_live`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    client: hello.client,
+                    subscribe: {
+                        key: `board:["${body.code}"]`,
+                        name: "board",
+                        args: [body.code],
+                    },
+                }),
+            });
+            assert.equal(subscribed.status, 200, await subscribed.clone().text());
+            assert.deepEqual(waitingOf(await next("patch")), []);
+
+            const customer = await fetch(`${url}/s/${body.code}`);
+            assert.equal(customer.status, 200);
+            const told = await next("patch");
+            assert.deepEqual(waitingOf(told), [1]);
+
+            const again = await fetch(`${url}/api/events`);
+            const second = again.body.pipeThrough(new TextDecoderStream()).getReader();
+            let more = "";
+            const following = async (type) => {
+                const event = new RegExp(`event: ${type}\\ndata: (.*)\\n\\n`);
+                let found;
+                const deadline = Date.now() + 2000;
+                while (!(found = event.exec(more))) {
+                    if (Date.now() > deadline) throw new Error(`no ${type} event`);
+                    const chunk = await Promise.race([
+                        second.read(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error(`no ${type} event`)), deadline - Date.now())),
+                    ]);
+                    if (chunk.done) return null;
+                    more += chunk.value;
+                }
+                more = more.slice(found.index + found[0].length);
+                return JSON.parse(found[1]);
+            };
+            const helloAgain = await following("hello");
+            await fetch(`${url}/api/_live`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    client: helloAgain.client,
+                    subscribe: {
+                        key: `board:["${body.code}"]`,
+                        name: "board",
+                        args: [body.code],
+                    },
+                }),
+            });
+            assert.deepEqual(waitingOf(await following("patch")), [1]);
+            await second.cancel();
+        } finally {
+            await reader.cancel();
+        }
+    });
+});
+
 test("the server listens for the proxy and serves create and join at the root", async () => {
     const port = await freePort();
     const child = spawn(process.execPath, ["server.mjs"], {

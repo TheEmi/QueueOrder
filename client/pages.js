@@ -124,7 +124,7 @@ export function Home(props, api) {
     api.onMount(() => {
         const sync = () => setSaved({ hosts: savedHosts(), tickets: savedTickets() });
         sync();
-        api.onCleanup(onDeviceChange(sync));
+        return onDeviceChange(sync);
     });
 
     async function create(event) {
@@ -515,12 +515,12 @@ export function Ticket(props, api) {
             },
         );
         const stopDevice = onDeviceChange(() => setMine(ticketOf(codeNow())));
-        api.onCleanup(() => {
+        return () => {
             stopWatch();
             stopGone();
             stopDevice();
             stopLive();
-        });
+        };
     });
 
     const view = () => {
@@ -717,12 +717,12 @@ export function Counter(props, api) {
             setRoom(false);
             setConfirm(false);
         });
-        api.onCleanup(() => {
+        return () => {
             stopWatch();
             stopGone();
             stopDevice();
             stopLive();
-        });
+        };
     });
 
     const view = () => {
@@ -1486,10 +1486,10 @@ export function Screen(props, api) {
             subscribed = next;
             stopLive = api.live("board", "board", next) ?? (() => {});
         });
-        api.onCleanup(() => {
+        return () => {
             stopWatch();
             stopLive();
-        });
+        };
     });
 
     const view = () => {
