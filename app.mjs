@@ -1,6 +1,32 @@
+import { randomUUID } from "node:crypto";
 import { createJurisServer } from "juris-kit/server/kernel.js";
 import { canonCode } from "./client/codes.js";
+import { DEVICE_COOKIE, readCookieDevice } from "./client/device.js";
 import { routes, register, title } from "./client/app.js";
+
+function visitor(req, url) {
+    if (!url.pathname.startsWith("/s/")) return null;
+    const existing = readCookieDevice(req.headers.cookie);
+    if (existing) return { deviceId: existing, fresh: false };
+    return { deviceId: randomUUID(), fresh: true };
+}
+
+function pageState({ route, viewer }, services) {
+    const deviceId = viewer?.deviceId || "";
+    const roots = { origin: "", deviceId };
+    if (route?.name !== "ticket" || !deviceId) return roots;
+    const code = canonCode(route.params?.code);
+    const current = services.board(code);
+    if (!current?.exists) return roots;
+    if (current.closed) return { ...roots, ticketError: { code, message: "This queue is closed." } };
+    try {
+        const taken = services.takeTicket(code, deviceId);
+        return { ...roots, ticket: { code, n: taken.n, name: taken.name } };
+    } catch (error) {
+        const message = error?.expose ? error.message : "Something went wrong. Try again.";
+        return { ...roots, ticketError: { code, message } };
+    }
+}
 
 function boardTarget(code) {
     const canon = canonCode(code);
@@ -56,7 +82,8 @@ export function createApp({ services, dev = false, build = "dev", trustProxy = f
         },
         page: {
             title,
-            state: () => ({ origin: "" }),
+            viewer: visitor,
+            state: (ctx) => pageState(ctx, services),
             head: async ({ versioned }) => ({
                 styles: [{ href: await versioned("/client/site.css") }],
                 meta: [
@@ -64,9 +91,12 @@ export function createApp({ services, dev = false, build = "dev", trustProxy = f
                     { name: "robots", content: "noindex" },
                 ],
             }),
-            headers: () => ({
+            headers: ({ viewer }) => ({
                 "x-content-type-options": "nosniff",
                 "referrer-policy": "no-referrer",
+                ...(viewer?.fresh
+                    ? { "set-cookie": `${DEVICE_COOKIE}=${viewer.deviceId}; Path=/; Max-Age=31536000; SameSite=Lax` }
+                    : {}),
             }),
         },
     });

@@ -438,11 +438,28 @@ function holding(current, n) {
     return current.serving === n || Boolean(current.waiting?.includes(n));
 }
 
+// A number the board has already finished. A number past `issued` belongs to a
+// snapshot that has not caught up, so it is not offered a new one yet.
+function needsNew(current, n) {
+    if (!current?.exists || !Number.isInteger(n) || current.closed) return false;
+    if (holding(current, n)) return false;
+    return n <= (current.issued ?? 0);
+}
+
+function issuedFor(api, code) {
+    const assigned = api.getState("ticket");
+    if (assigned?.code === code && Number.isInteger(assigned.n)) return assigned;
+    const n = ticketOf(code);
+    return n == null ? null : { code, n, name: "" };
+}
+
 export function Ticket(props, api) {
     const initial = canonCode(api.getState("$route.params.code"));
     let stopLive = api.live("board", "board", initial) ?? (() => {});
-    const [mine, setMine] = api.useState("mine", null);
-    const [error, setError] = api.useState("error", "");
+    const seeded = issuedFor(api, initial);
+    const serverError = api.getState("ticketError");
+    const [mine, setMine] = api.useState("mine", seeded?.n ?? null);
+    const [error, setError] = api.useState("error", serverError?.code === initial ? serverError.message : "");
     const [pending, setPending] = api.useState("pending", false);
     const codeNow = () => canonCode(api.getState("$route.params.code"));
     const board = () => api.getState("board");
@@ -451,9 +468,10 @@ export function Ticket(props, api) {
     api.onMount(() => {
         let busy = false;
         const claim = async (code, force) => {
-            const held = ticketOf(code);
-            if (!force && held != null) {
-                setMine(held);
+            const held = force ? null : issuedFor(api, code);
+            if (held) {
+                rememberTicket(code, held.n, held.name || api.getState("board.name"));
+                setMine(held.n);
                 return;
             }
             if (busy) return;
@@ -475,11 +493,17 @@ export function Ticket(props, api) {
         again = () => claim(codeNow(), true);
         let subscribed = initial;
         const stopWatch = api.bindState(() => codeNow(), (next) => {
-            setError("");
-            claim(next, false);
+            const known = issuedFor(api, next);
+            if (known) {
+                rememberTicket(next, known.n, known.name || api.getState("board.name"));
+                setMine(known.n);
+            } else {
+                claim(next, false);
+            }
             if (next === subscribed) return;
             stopLive();
             subscribed = next;
+            setError("");
             stopLive = api.live("board", "board", next) ?? (() => {});
         });
         const stopGone = api.bindState(
@@ -543,7 +567,7 @@ export function Ticket(props, api) {
                                 button: {
                                     className: "primary",
                                     type: "button",
-                                    hidden: () => mine() == null || holding(board(), mine()) || pending() || Boolean(board()?.closed),
+                                    hidden: () => pending() || !needsNew(board(), mine()),
                                     onclick: () => again(),
                                     textContent: "New number",
                                 },

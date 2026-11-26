@@ -1,6 +1,27 @@
 // What this phone remembers. The server keeps the queue; the phone keeps which
 // queue it runs and which number it took, so a reload brings the same one back.
 const KEY = "queue-order.v1";
+export const DEVICE_COOKIE = "qd";
+
+export function readCookieDevice(header) {
+    const parts = String(header ?? "").split(";");
+    for (const part of parts) {
+        const [name, ...rest] = part.trim().split("=");
+        const value = rest.join("=");
+        if (name === DEVICE_COOKIE && /^[0-9a-f-]{36}$/i.test(value)) return value.toLowerCase();
+    }
+    return "";
+}
+
+function browserCookie() {
+    if (typeof document === "undefined") return "";
+    return readCookieDevice(document.cookie);
+}
+
+function rememberCookie(id) {
+    if (typeof document === "undefined") return;
+    document.cookie = `${DEVICE_COOKIE}=${id}; Path=/; Max-Age=31536000; SameSite=Lax`;
+}
 
 function empty() {
     return { deviceId: "", hosts: {}, tickets: {} };
@@ -29,10 +50,13 @@ function save(data) {
 
 export function deviceId() {
     const data = load();
-    if (/^[0-9a-f-]{36}$/i.test(data.deviceId)) return data.deviceId.toLowerCase();
-    const id = crypto.randomUUID();
-    data.deviceId = id;
-    save(data);
+    const stored = /^[0-9a-f-]{36}$/i.test(data.deviceId) ? data.deviceId.toLowerCase() : "";
+    const id = browserCookie() || stored || crypto.randomUUID();
+    if (data.deviceId !== id) {
+        data.deviceId = id;
+        save(data);
+    }
+    rememberCookie(id);
     return id;
 }
 

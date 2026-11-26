@@ -108,6 +108,25 @@ test("the home page offers create queue and join queue", async () => {
     });
 });
 
+test("a customer page is sent with its number already on it", async () => {
+    await withApp(async (url) => {
+        const { body } = await post(url, "createSession", ["Window"]);
+        const first = await fetch(`${url}/s/${body.code}`);
+        const html = await first.text();
+        const cookie = first.headers.get("set-cookie") ?? "";
+        assert.match(cookie, /qd=[0-9a-f-]{36}/i);
+        assert.match(html, /class="number"[^>]*>1</);
+        const button = html.match(/<button[^>]*>New number<\/button>/);
+        assert.ok(button);
+        assert.match(button[0], /\shidden(?:=|>)/);
+
+        const again = await fetch(`${url}/s/${body.code}`, { headers: { cookie: cookie.split(";")[0] } });
+        const second = await again.text();
+        assert.match(second, /class="number"[^>]*>1</);
+        assert.equal(second.includes(">2<"), false);
+    });
+});
+
 test("pages render the queue and keep the pairing code off the customer page", async () => {
     await withApp(async (url) => {
         const { body } = await post(url, "createSession", ["Bakery"]);
