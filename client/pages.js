@@ -1139,6 +1139,7 @@ export function Counter(props, api) {
                                                 children: [
                                                     {
                                                         div: {
+                                                            className: "share-qr",
                                                             children: () => [qrLayout(customerUrl(), "Customer code")],
                                                         },
                                                     },
@@ -1175,6 +1176,26 @@ export function Counter(props, api) {
                                                                         textContent: "Copy customer link",
                                                                     },
                                                                 },
+                                                                {
+                                                                    a: {
+                                                                        className: "ghost link",
+                                                                        href: () => `/tv/${codeNow()}`,
+                                                                        target: "_blank",
+                                                                        rel: "noopener",
+                                                                        textContent: "Open the TV page",
+                                                                    },
+                                                                },
+                                                                {
+                                                                    p: {
+                                                                        className: "hint",
+                                                                        textContent: () => {
+                                                                            const origin = api.getState("origin");
+                                                                            return origin
+                                                                                ? `On a television, open ${origin}/tv/${codeNow()}`
+                                                                                : "Open the TV page on the television.";
+                                                                        },
+                                                                    },
+                                                                },
                                                             ],
                                                         },
                                                     },
@@ -1188,6 +1209,7 @@ export function Counter(props, api) {
                                                 children: [
                                                     {
                                                         div: {
+                                                            className: "share-qr",
                                                             children: () => [qrLayout(paired() ? pairUrl() : "", "Pairing code")],
                                                         },
                                                     },
@@ -1439,6 +1461,122 @@ export function Pair(props, api) {
                                     className: "note",
                                     hidden: () => !error(),
                                     textContent: () => error(),
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        },
+    };
+}
+
+export function Screen(props, api) {
+    const initial = canonCode(api.getState("$route.params.code"));
+    let stopLive = api.live("board", "board", initial) ?? (() => {});
+    const codeNow = () => canonCode(api.getState("$route.params.code"));
+    const board = () => api.getState("board");
+
+    api.onMount(() => {
+        api.setValue("origin", location.origin);
+        let subscribed = initial;
+        const stopWatch = api.bindState(() => codeNow(), (next) => {
+            if (next === subscribed) return;
+            stopLive();
+            subscribed = next;
+            stopLive = api.live("board", "board", next) ?? (() => {});
+        });
+        api.onCleanup(() => {
+            stopWatch();
+            stopLive();
+        });
+    });
+
+    const view = () => {
+        const current = board();
+        if (!current) return "opening";
+        if (!current.exists) return "missing";
+        return "screen";
+    };
+
+    const joinUrl = () => {
+        const origin = api.getState("origin");
+        const code = codeNow();
+        return origin && code ? `${origin}/s/${code}` : "";
+    };
+
+    return {
+        section: {
+            className: "screen",
+            children: [
+                {
+                    div: {
+                        className: "center-card stack",
+                        hidden: () => view() !== "missing",
+                        children: [
+                            wordmark(),
+                            { h1: { textContent: "This queue is gone" } },
+                            {
+                                p: {
+                                    className: "lede",
+                                    textContent: "It was deleted, or the server restarted and forgot it.",
+                                },
+                            },
+                        ],
+                    },
+                },
+                {
+                    p: {
+                        className: "status",
+                        hidden: () => view() !== "opening",
+                        textContent: "Opening the queue…",
+                    },
+                },
+                {
+                    div: {
+                        className: "screen-grid",
+                        hidden: () => view() !== "screen",
+                        children: [
+                            {
+                                div: {
+                                    className: "screen-qr",
+                                    children: () => [qrLayout(joinUrl(), "Join the queue")],
+                                },
+                            },
+                            {
+                                div: {
+                                    className: "screen-copy stack",
+                                    children: [
+                                        wordmark(),
+                                        { h1: { textContent: () => board()?.name || "Queue" } },
+                                        { p: { className: "kicker", textContent: "Join code" } },
+                                        {
+                                            p: {
+                                                className: "code screen-code",
+                                                translate: "no",
+                                                textContent: () => spaced(codeNow()),
+                                            },
+                                        },
+                                        { p: { className: "kicker", textContent: "Or open" } },
+                                        {
+                                            p: {
+                                                className: "screen-url",
+                                                translate: "no",
+                                                children: () => {
+                                                    const origin = api.getState("origin");
+                                                    const url = joinUrl();
+                                                    if (!origin || !url.startsWith(origin)) return [url];
+                                                    return [origin, { wbr: {} }, url.slice(origin.length)];
+                                                },
+                                            },
+                                        },
+                                        {
+                                            p: {
+                                                className: "lede",
+                                                textContent: "Scan the code, or open the address and enter the code.",
+                                            },
+                                        },
+                                    ],
                                 },
                             },
                         ],

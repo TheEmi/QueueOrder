@@ -1,5 +1,5 @@
 import { canonCode } from "./codes.js";
-import { Home, Ticket, Counter, Pair, Missing } from "./pages.js";
+import { Home, Ticket, Counter, Screen, Pair, Missing } from "./pages.js";
 
 const queueTitle = (board) => (board?.exists ? board.name : "No queue");
 
@@ -28,6 +28,13 @@ export const routes = [
         head: { titleFrom: queueTitle },
     },
     {
+        path: "/tv/:code",
+        name: "screen",
+        component: "Screen",
+        preload: ({ params }) => [["board", canonCode(params.code)]],
+        head: { titleFrom: queueTitle },
+    },
+    {
         path: "/pair/:code",
         name: "pair",
         component: "Pair",
@@ -51,6 +58,7 @@ export function register(juris) {
     juris.registerComponent("Home", Home);
     juris.registerComponent("Ticket", Ticket);
     juris.registerComponent("Counter", Counter);
+    juris.registerComponent("Screen", Screen);
     juris.registerComponent("Pair", Pair);
     juris.registerComponent("Missing", Missing);
 }

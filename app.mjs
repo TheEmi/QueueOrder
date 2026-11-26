@@ -4,16 +4,37 @@ import { canonCode } from "./client/codes.js";
 import { DEVICE_COOKIE, readCookieDevice } from "./client/device.js";
 import { routes, register, title } from "./client/app.js";
 
-function visitor(req, url) {
+function firstHeader(req, name) {
+    return String(req.headers[name] ?? "").split(",")[0].trim();
+}
+
+function requestOrigin(req, trustProxy) {
+    const forwardedHost = trustProxy ? firstHeader(req, "x-forwarded-host") : "";
+    const forwardedProto = trustProxy ? firstHeader(req, "x-forwarded-proto") : "";
+    const host = forwardedHost || String(req.headers.host ?? "").trim();
+    const proto = forwardedProto === "https" || forwardedProto === "http" ? forwardedProto : "http";
+    if (!/^[[\]A-Za-z0-9.:-]+$/.test(host)) return "";
+    try {
+        const parsed = new URL(`${proto}://${host}`);
+        if (parsed.username || parsed.password) return "";
+        return parsed.origin;
+    } catch {
+        return "";
+    }
+}
+
+function visitor(req, url, trustProxy) {
+    const origin = requestOrigin(req, trustProxy);
+    if (url.pathname.startsWith("/tv/")) return { origin };
     if (!url.pathname.startsWith("/s/")) return null;
     const existing = readCookieDevice(req.headers.cookie);
-    if (existing) return { deviceId: existing, fresh: false };
-    return { deviceId: randomUUID(), fresh: true };
+    if (existing) return { deviceId: existing, fresh: false, origin };
+    return { deviceId: randomUUID(), fresh: true, origin };
 }
 
 function pageState({ route, viewer }, services) {
     const deviceId = viewer?.deviceId || "";
-    const roots = { origin: "", deviceId };
+    const roots = { origin: viewer?.origin || "", deviceId };
     if (route?.name !== "ticket" || !deviceId) return roots;
     const code = canonCode(route.params?.code);
     const current = services.board(code);
@@ -82,7 +103,7 @@ export function createApp({ services, dev = false, build = "dev", trustProxy = f
         },
         page: {
             title,
-            viewer: visitor,
+            viewer: (req, url) => visitor(req, url, trustProxy),
             state: (ctx) => pageState(ctx, services),
             head: async ({ versioned }) => ({
                 styles: [{ href: await versioned("/client/site.css") }],

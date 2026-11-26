@@ -127,6 +127,44 @@ test("a customer page is sent with its number already on it", async () => {
     });
 });
 
+test("a television page shows the join code, the address, and a QR", async () => {
+    await withApp(async (url) => {
+        const { body } = await post(url, "createSession", ["Front window"]);
+        const page = await fetch(`${url}/tv/${body.code}`, {
+            headers: { "x-forwarded-host": "evil.example", "x-forwarded-proto": "https" },
+        });
+        const html = await page.text();
+        const code = `${body.code.slice(0, 2)} ${body.code.slice(2)}`;
+        assert.equal(page.status, 200);
+        assert.match(html, /<h1[^>]*>Front window<\/h1>/);
+        assert.match(html, new RegExp(`class="code screen-code"[^>]*>${code}<`));
+        assert.match(html, new RegExp(`${url}(?:<wbr>)?/s/${body.code}`));
+        assert.match(html, /<svg class="qr"/);
+        assert.equal(html.includes("evil.example"), false);
+        assert.equal(html.includes(body.pair), false);
+
+        const host = await fetch(`${url}/h/${body.code}`);
+        assert.match(await host.text(), new RegExp(`/tv/${body.code}`));
+    });
+});
+
+test("a television page uses the public address behind the proxy", async () => {
+    const app = await createApp({ services: createServices(), trustProxy: true });
+    const { url } = await app.listen();
+    try {
+        const { body } = await post(url, "createSession", ["Lobby"]);
+        const page = await fetch(`${url}/tv/${body.code}`, {
+            headers: { "x-forwarded-host": "queue.example", "x-forwarded-proto": "https" },
+        });
+        const html = await page.text();
+        assert.equal(page.status, 200);
+        assert.match(html, /https:\/\/queue\.example(?:<wbr>)?\/s\//);
+        assert.equal(html.includes(body.pair), false);
+    } finally {
+        await app.close();
+    }
+});
+
 test("pages render the queue and keep the pairing code off the customer page", async () => {
     await withApp(async (url) => {
         const { body } = await post(url, "createSession", ["Bakery"]);
